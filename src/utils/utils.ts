@@ -34,7 +34,7 @@ export function generateAccessKey(accessKeyData: GenerateAccessKey) {
 }
 
 function formatDateToDDMMYYYY(date: Date) {
-  let day = date.getDate();
+  let day = date.getDay();
   let month = date.getMonth() + 1; // getMonth() returns 0-11
   let year = date.getFullYear();
 

@@ -1,6 +1,5 @@
 import * as forge from "node-forge";
 import { readFileSync } from "fs";
-import fetch from "node-fetch";
 
 export function getP12FromLocalFile(path: string) {
   const file = readFileSync(path);
@@ -130,7 +129,6 @@ export async function signXml(
   if (date < notBefore || date > notAfter) {
     throw new Error("Expired certificate");
   }
-
   const key = (pkcs8 as any).key ?? (pkcs8 as any).asn1;
   const certificateX509_pem = forge.pki.certificateToPem(certificate!);
 
