@@ -10,7 +10,7 @@ export function generateInvoiceXml(invoice: Invoice) {
 
 export function generateInvoice(invoiceData: InvoiceInput) {
   const accessKey = generateAccessKey({
-    date: new Date(invoiceData.infoFactura.fechaEmision),
+    date: invoiceData.infoFactura.fechaEmision,
     codDoc: invoiceData.infoTributaria.codDoc,
     ruc: invoiceData.infoTributaria.ruc,
     environment: invoiceData.infoTributaria.ambiente,

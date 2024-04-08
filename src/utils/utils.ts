@@ -1,5 +1,5 @@
 export type GenerateAccessKey = {
-  date: Date;
+  date: Date | string;
   /*
   FACTURA 01
   LIQUIDACIÓN DE COMPRA DE
@@ -20,7 +20,10 @@ export type GenerateAccessKey = {
 
 export function generateAccessKey(accessKeyData: GenerateAccessKey) {
   let accessKey = "";
-  accessKey += formatDateToDDMMYYYY(accessKeyData.date); // Fecha de emisión
+  accessKey +=
+    accessKeyData.date instanceof Date
+      ? formatDateToDDMMYYYY(accessKeyData.date)
+      : accessKeyData.date.replaceAll("/", ""); // Fecha de emisión
   accessKey += accessKeyData.codDoc; // Tipo de comprobante
   accessKey += accessKeyData.ruc; // Número de RUC
   accessKey += accessKeyData.environment; // Tipo de ambiente
@@ -34,15 +37,11 @@ export function generateAccessKey(accessKeyData: GenerateAccessKey) {
 }
 
 function formatDateToDDMMYYYY(date: Date) {
-  let day = date.getDay();
-  let month = date.getMonth() + 1; // getMonth() returns 0-11
-  let year = date.getFullYear();
+  const day = date.getDate().toString().padStart(2, "0");
+  const month = (date.getMonth() + 1).toString().padStart(2, "0");
+  const year = date.getFullYear().toString();
 
-  // Pad day and month with a leading zero if they are less than 10
-  const finalDay = day < 10 ? "0" + day : day;
-  const finalMonth = month < 10 ? "0" + month : month;
-
-  return `${finalDay}${finalMonth}${year}`;
+  return `${day}${month}${year}`;
 }
 
 function generateRandomEightDigitNumber(): number {
