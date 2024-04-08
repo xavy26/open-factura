@@ -1,4 +1,4 @@
-import { createClient, Client } from "soap";
+import { Client, createClient } from "soap";
 
 export async function documentAuthorization(
   accesKey: string,
