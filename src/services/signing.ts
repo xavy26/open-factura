@@ -133,10 +133,10 @@ export async function signXml(
   const certificateX509_pem = forge.pki.certificateToPem(certificate!);
 
   let certificateX509 = certificateX509_pem;
-  certificateX509 = certificateX509.substr(certificateX509.indexOf("\n"));
-  certificateX509 = certificateX509.substr(
+  certificateX509 = certificateX509.substring(certificateX509.indexOf("\n"));
+  certificateX509 = certificateX509.substring(
     0,
-    certificateX509.indexOf("\n-----END CERTIFICATE-----")
+    certificateX509.indexOf("\n-----END CERTIFICATE-----") - 1
   );
 
   certificateX509 = certificateX509
