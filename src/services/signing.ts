@@ -101,6 +101,40 @@ function getRandomNumber(min = 990, max = 9999) {
   return Math.floor(Math.random() * (max - min + 1) + min);
 }
 
+/**
+ * Cleans the XML string by removing unnecessary whitespace and line breaks.
+ *
+ * @param xml - The XML string to be cleaned.
+ * @returns The cleaned XML string.
+ */
+function cleanXml(xml: string) {
+  return xml
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/(?<=\>)(\r?\n)|(\r?\n)(?=\<\/)/g, "")
+    .trim()
+    .replace(/(?<=\>)(\s*)/g, "")
+    .trim()
+    .replace(/\t|\r/g, "")
+    .trim();
+}
+
+/**
+ * Extracts P12 data from an ArrayBuffer and returns a PKCS12 object.
+ * @param p12Data - The P12 data as an ArrayBuffer.
+ * @param p12Password - The password for the P12 data.
+ * @returns The PKCS12 object extracted from the P12 data.
+ */
+function extractP12Data(p12Data: ArrayBuffer, p12Password: string) {
+  const arrayUint8 = new Uint8Array(p12Data);
+  const base64 = forge.util.binary.base64.encode(arrayUint8);
+  const der = forge.util.decode64(base64);
+
+  const asn1 = forge.asn1.fromDer(der);
+  return forge.pkcs12.pkcs12FromAsn1(asn1, p12Password);
+}
+
+
 export async function signXml(
   p12Data: ArrayBuffer,
   p12Password: string,
