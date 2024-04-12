@@ -135,6 +135,52 @@ function extractP12Data(p12Data: ArrayBuffer, p12Password: string) {
   return forge.pkcs12.pkcs12FromAsn1(asn1, p12Password);
 }
 
+function generateCertificates(certBags: forge.pkcs12.Bag[]) {
+  const certificates: {
+    x509: String;
+    hash: String;
+    serialNum: Number;
+  }[] = [];
+
+  certBags.forEach((certBag) => {
+    const certificate = certBag.cert!;
+
+    const notBefore = certificate!.validity.notBefore;
+    const notAfter = certificate!.validity.notAfter;
+    const date = new Date();
+
+    if (date < notBefore || date > notAfter) {
+      throw new Error("Expired certificate");
+    }
+
+    const certificateX509_pem = forge.pki.certificateToPem(certificate);
+
+    let certificateX509 = certificateX509_pem.substring(
+      certificateX509_pem.indexOf("\n") + 1,
+      certificateX509_pem.indexOf("\n-----END CERTIFICATE-----")
+    );
+
+    certificateX509 = certificateX509
+      .replace(/\r?\n|\r/g, "")
+      .replace(/([^\0]{76})/g, "$1&#13;\n");
+
+    const certificateX509_asn1 = forge.pki.certificateToAsn1(certificate);
+    const certificateX509_der = forge.asn1
+      .toDer(certificateX509_asn1)
+      .getBytes();
+    const hash_certificateX509_der = sha1Base64(certificateX509_der);
+    const certificateX509_serialNumber = parseInt(certificate.serialNumber, 16);
+
+    certificates.push({
+      x509: certificateX509,
+      hash: hash_certificateX509_der,
+      serialNum: certificateX509_serialNumber,
+    });
+  });
+
+  return certificates;
+}
+
 export async function signXmlWithXades({
   certBase64: cert,
   alg,
@@ -203,26 +249,25 @@ export async function signXml(
   const certBags = p12.getBags({
     bagType: forge.pki.oids.certBag,
   })[(forge as any).oids.certBag];
-  const certBag = certBags;
 
-  console.log("CERT BAG:", certBag);
+  console.log("CERT BAG:", certBags);
 
-  const friendlyName = certBag![1].attributes.friendlyName[0]; // AUTORIDAD DE CERTIFICACION SUBCA-2 SECURITY DATA
+  const friendlyName = certBags![1].attributes.friendlyName[0]; // AUTORIDAD DE CERTIFICACION SUBCA-2 SECURITY DATA
   console.log("FRIENDLY NAME:", friendlyName);
 
-  console.log("FRINDLY NAME 0:", certBag![0].attributes.friendlyName); // TITO ANDRES VALAREZO FLORES
-  console.log("FRINDLY NAME 1:", certBag![1].attributes.friendlyName); // AUTORIDAD DE CERTIFICACION SUBCA-2 SECURITY DATA
-  console.log("FRINDLY NAME 2:", certBag![2].attributes.friendlyName); // AUTORIDAD DE CERTIFICACION RAIZ CA-2 SECURITY DATA
+  console.log("FRINDLY NAME 0:", certBags![0].attributes.friendlyName); // TITO ANDRES VALAREZO FLORES
+  console.log("FRINDLY NAME 1:", certBags![1].attributes.friendlyName); // AUTORIDAD DE CERTIFICACION SUBCA-2 SECURITY DATA
+  console.log("FRINDLY NAME 2:", certBags![2].attributes.friendlyName); // AUTORIDAD DE CERTIFICACION RAIZ CA-2 SECURITY DATA
 
   let certificate: forge.pki.Certificate;
   let pkcs8: forge.pkcs12.Bag;
   let issuerName = "";
 
-  certBag!.forEach((bag, i) => {
+  certBags!.forEach((bag, i) => {
     console.log(`BAG [${i}]:`, bag);
   });
 
-  const cert = certBag!.reduce((prev, curr) =>
+  const cert = certBags!.reduce((prev, curr) =>
     curr.cert!.extensions.length > prev.cert!.extensions.length ? curr : prev
   );
 
@@ -233,7 +278,7 @@ export async function signXml(
     .map((attribute) => {
       return `${attribute.shortName}=${attribute.value}`;
     })
-    .join(",");
+    .join(", ");
 
   if (/BANCO CENTRAL/i.test(friendlyName)) {
     pkcs8 = pkcs8Bags[forge.pki.oids.pkcs8ShroudedKeyBag]!.find(
@@ -266,12 +311,17 @@ export async function signXml(
 
   certificateX509 = certificateX509
     .replace(/\r?\n|\r/g, "")
-    .replace(/([^\0]{76})/g, "$1\n");
+    .replace(/([^\0]{76})/g, "$1&#13;\n");
 
   const certificateX509_asn1 = forge.pki.certificateToAsn1(certificate);
   const certificateX509_der = forge.asn1.toDer(certificateX509_asn1).getBytes();
-  const hash_certificateX509_der = sha1Base64(certificateX509_der, "utf8");
+  const hash_certificateX509_der = sha1Base64(certificateX509_der);
   const certificateX509_serialNumber = parseInt(certificate.serialNumber, 16);
+
+  console.log("=== CERTIFICATES X509 ===");
+  const certificates = generateCertificates(certBags!);
+  console.log("CERTIFICATES X509:", certificates);
+  console.log("=== CERTIFICATES X509 ===");
 
   const exponent = hexToBase64(
     (key as forge.pki.rsa.PrivateKey).e.data[0].toString(16)
@@ -353,9 +403,13 @@ export async function signXml(
   let keyInfo = "";
   keyInfo += '<ds:KeyInfo Id="Certificate' + certificateNumber + '">';
   keyInfo += "\n<ds:X509Data>";
-  keyInfo += "\n<ds:X509Certificate>\n";
-  keyInfo += certificateX509;
-  keyInfo += "\n</ds:X509Certificate>";
+
+  certificates.forEach((cert) => {
+    keyInfo += "\n<ds:X509Certificate>\n";
+    keyInfo += cert.x509;
+    keyInfo += "\n</ds:X509Certificate>";
+  });
+
   keyInfo += "\n</ds:X509Data>";
   keyInfo += "\n<ds:KeyValue>";
   keyInfo += "\n<ds:RSAKeyValue>";
@@ -411,7 +465,13 @@ export async function signXml(
     '" URI="#comprobante">';
   signedInfo += "\n<ds:Transforms>";
   signedInfo +=
-    '\n<ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature">';
+    '\n<ds:Transform Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"></ds:Transform>';
+  signedInfo +=
+    '\n<ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"></ds:Transform>';
+  signedInfo +=
+    '\n<ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116">';
+  signedInfo +=
+    '<ds:XPath xmlns:ds="http://www.w3.org/2000/09/xmldsig#">not(ancestor-or-self::ds:Signature)</ds:XPath>';
   signedInfo += "</ds:Transform>";
   signedInfo += "\n</ds:Transforms>";
   signedInfo +=
