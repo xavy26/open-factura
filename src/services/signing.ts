@@ -1,6 +1,12 @@
+import { readFileSync } from "fs";
 import * as forge from "node-forge";
 import { readFileSync } from "fs";
 
+/**
+ * Reads a P12 file from the local file system and returns its buffer.
+ * @param path - The path to the P12 file.
+ * @returns The buffer containing the P12 file.
+ */
 export function getP12FromLocalFile(path: string) {
   const file = readFileSync(path);
   const buffer = file.buffer.slice(
@@ -10,6 +16,11 @@ export function getP12FromLocalFile(path: string) {
   return buffer;
 }
 
+/**
+ * Fetches a P12 file from the specified URL.
+ * @param url - The URL of the P12 file.
+ * @returns A Promise that resolves to the fetched P12 file as an ArrayBuffer.
+ */
 export async function getP12FromUrl(url: string) {
   const file = await fetch(url)
     .then((response) => response.arrayBuffer())
@@ -17,11 +28,21 @@ export async function getP12FromUrl(url: string) {
   return file;
 }
 
+/**
+ * Reads the contents of a local file and returns it as a string.
+ * @param path - The path to the local file.
+ * @returns The contents of the file as a string.
+ */
 export function getXMLFromLocalFile(path: string) {
   const file = readFileSync(path, "utf8");
   return file;
 }
 
+/**
+ * Retrieves XML data from a local URL.
+ * @param url - The URL of the XML file.
+ * @returns A Promise that resolves to the XML data.
+ */
 export async function getXMLFromLocalUrl(url: string) {
   const file = await fetch(url)
     .then((response) => response.text())
@@ -29,31 +50,53 @@ export async function getXMLFromLocalUrl(url: string) {
   return file;
 }
 
+/**
+ * Calculates the SHA-1 hash of the given text and returns it as a Base64-encoded string.
+ *
+ * @param text The text to calculate the hash for.
+ * @param encoding The encoding of the input text. Defaults to "utf8".
+ * @returns The Base64-encoded SHA-1 hash of the input text.
+ */
 function sha1Base64(text: string, encoding: forge.Encoding = "utf8") {
   let md = forge.md.sha1.create();
   md.update(text, encoding);
   const hash = md.digest().toHex();
-  const buffer = Buffer.from(hash, "hex");
-  const base64 = buffer.toString("base64");
+  const base64 = Buffer.from(hash, "hex").toString("base64");
   return base64;
 }
 
+/**
+ * Converts a hexadecimal string to a base64 string.
+ * @param hex The hexadecimal string to convert.
+ * @returns The base64 representation of the input hexadecimal string.
+ */
 function hexToBase64(hex: string) {
-  hex = hex.padStart(hex.length + (hex.length % 2), "0");
-  const bytes = hex.match(/.{2}/g)!.map((byte) => parseInt(byte, 16));
+  const hexStr = hex.padStart(6, "0");
+  const bytes = hexStr.match(/.{2}/g)!.map((byte) => parseInt(byte, 16));
   return btoa(String.fromCharCode(...bytes));
 }
 
-function bigIntToBase64(bigInt: number) {
+/**
+ * Converts a big integer to a base64 string.
+ *
+ * @param bigInt - The big integer to convert.
+ * @returns The base64 representation of the big integer.
+ */
+function bigIntToBase64(bigInt: number | forge.jsbn.BigInteger) {
   const hex = bigInt.toString(16);
   const hexPairs = hex.match(/\w{2}/g);
   const bytes = hexPairs!.map((pair) => parseInt(pair, 16));
-  const byteString = String.fromCharCode(...bytes);
-  const base64 = btoa(byteString);
+  const base64 = btoa(String.fromCharCode(...bytes));
   const formatedBase64 = base64.match(/.{1,76}/g)!.join("\n");
   return formatedBase64;
 }
 
+/**
+ * Generates a random number between the specified minimum and maximum values.
+ * @param min - The minimum value (default: 990).
+ * @param max - The maximum value (default: 9999).
+ * @returns The randomly generated number.
+ */
 function getRandomNumber(min = 990, max = 9999) {
   return Math.floor(Math.random() * (max - min + 1) + min);
 }
