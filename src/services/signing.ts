@@ -1,6 +1,7 @@
 import { readFileSync } from "fs";
 import * as forge from "node-forge";
-import { readFileSync } from "fs";
+import XAdES, { Convert } from "xadesjs";
+import { KeyInfoX509Data, X509Certificate } from "xmldsigjs";
 
 /**
  * Reads a P12 file from the local file system and returns its buffer.
@@ -134,6 +135,58 @@ function extractP12Data(p12Data: ArrayBuffer, p12Password: string) {
   return forge.pkcs12.pkcs12FromAsn1(asn1, p12Password);
 }
 
+export async function signXmlWithXades({
+  certBase64: cert,
+  alg,
+  keys,
+  xml,
+  id,
+}: {
+  certBase64: string;
+  alg: RsaHashedKeyGenParams;
+  keys: CryptoKeyPair;
+  xml: string;
+  id: string;
+}) {
+  const signature = new XAdES.SignedXml();
+
+  signature.XmlSignature.SignedInfo.Id = `Signature-SignedInfo-${id}`;
+  signature.SignedProperties.Id = `Signature-SignedInfo-SignedProperties-${id}`;
+
+  const x509Cert = new X509Certificate(Convert.FromBase64(cert));
+  signature.XmlSignature.KeyInfo.Id = `Signature-KeyInfo-${id}`;
+  signature.XmlSignature.KeyInfo.Add(new KeyInfoX509Data(x509Cert));
+
+  // Add Data Object Format
+  const dataObjectFormat = new XAdES.xml.DataObjectFormat();
+  const referenceID = `Reference-ID-${id}`;
+  dataObjectFormat.ObjectReference = `#${referenceID}`;
+  dataObjectFormat.Description = "contenido comprobante";
+  dataObjectFormat.MimeType = "text/xml";
+  signature.SignedProperties.SignedDataObjectProperties.DataObjectFormats.Add(
+    dataObjectFormat
+  );
+
+  await signature.Sign(alg, keys.privateKey, XAdES.Parse(xml), {
+    id: `Signature-${id}`,
+    keyValue: keys.publicKey,
+    references: [
+      {
+        hash: "SHA-1",
+        transforms: ["enveloped"],
+        id: referenceID,
+        uri: "#comprobante",
+      },
+      { hash: "SHA-1", uri: `#${signature.XmlSignature.KeyInfo.Id}` },
+    ],
+    signingCertificate: {
+      certificate: cert,
+      digestAlgorithm: "SHA-1",
+    },
+  });
+
+  return signature.toString();
+}
 
 export async function signXml(
   p12Data: ArrayBuffer,
