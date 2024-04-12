@@ -140,38 +140,38 @@ export async function signXml(
   p12Password: string,
   xmlData: string
 ) {
-  const arrayBuffer = p12Data;
-  let xml = xmlData;
-  xml = xml.replace(/\s+/g, " ");
-  xml = xml.trim();
-  xml = xml.replace(/(?<=\>)(\r?\n)|(\r?\n)(?=\<\/)/g, "");
-  xml = xml.trim();
-  xml = xml.replace(/(?<=\>)(\s*)/g, "");
+  let xml = cleanXml(xmlData);
 
-  const arrayUint8 = new Uint8Array(arrayBuffer);
-  const base64 = forge.util.binary.base64.encode(arrayUint8);
-  const der = forge.util.decode64(base64);
+  const p12 = extractP12Data(p12Data, p12Password);
 
-  const asn1 = forge.asn1.fromDer(der);
-  const p12 = forge.pkcs12.pkcs12FromAsn1(asn1, p12Password);
   const pkcs8Bags = p12.getBags({
     bagType: forge.pki.oids.pkcs8ShroudedKeyBag,
   });
   const certBags = p12.getBags({
     bagType: forge.pki.oids.certBag,
-  });
-  const certBag = certBags[(forge as any).oids.certBag];
+  })[(forge as any).oids.certBag];
+  const certBag = certBags;
 
-  const friendlyName = certBag![1].attributes.friendlyName[0];
+  console.log("CERT BAG:", certBag);
 
-  let certificate;
-  let pkcs8;
+  const friendlyName = certBag![1].attributes.friendlyName[0]; // AUTORIDAD DE CERTIFICACION SUBCA-2 SECURITY DATA
+  console.log("FRIENDLY NAME:", friendlyName);
+
+  console.log("FRINDLY NAME 0:", certBag![0].attributes.friendlyName); // TITO ANDRES VALAREZO FLORES
+  console.log("FRINDLY NAME 1:", certBag![1].attributes.friendlyName); // AUTORIDAD DE CERTIFICACION SUBCA-2 SECURITY DATA
+  console.log("FRINDLY NAME 2:", certBag![2].attributes.friendlyName); // AUTORIDAD DE CERTIFICACION RAIZ CA-2 SECURITY DATA
+
+  let certificate: forge.pki.Certificate;
+  let pkcs8: forge.pkcs12.Bag;
   let issuerName = "";
 
-  const cert = certBag!.reduce((prev, curr) => {
-    const attributes = curr.cert!.extensions;
-    return attributes.length > prev.cert!.extensions.length ? curr : prev;
+  certBag!.forEach((bag, i) => {
+    console.log(`BAG [${i}]:`, bag);
   });
+
+  const cert = certBag!.reduce((prev, curr) =>
+    curr.cert!.extensions.length > prev.cert!.extensions.length ? curr : prev
+  );
 
   const issueAttributes = cert.cert!.issuer.attributes;
 
@@ -180,55 +180,50 @@ export async function signXml(
     .map((attribute) => {
       return `${attribute.shortName}=${attribute.value}`;
     })
-    .join(", ");
+    .join(",");
 
   if (/BANCO CENTRAL/i.test(friendlyName)) {
-    let keys = pkcs8Bags[(forge as any).oids.pkcs8ShroudedKeyBag];
-    for (let i = 0; i < keys!.length; i++) {
-      const element = keys![i];
-      let name = element.attributes.friendlyName[0];
-      if (/Signing Key/i.test(name)) {
-        pkcs8 = pkcs8Bags[(forge as any).oids.pkcs8ShroudedKeyBag[i]];
-      }
-    }
+    pkcs8 = pkcs8Bags[forge.pki.oids.pkcs8ShroudedKeyBag]!.find(
+      (bag: forge.pkcs12.Bag) =>
+        /Signing Key/i.test(bag.attributes.friendlyName[0])
+    ) as forge.pkcs12.Bag;
+  } else if (/SECURITY DATA/i.test(friendlyName)) {
+    pkcs8 = pkcs8Bags[forge.pki.oids.pkcs8ShroudedKeyBag]![0];
+  } else {
+    throw new Error("Certificate not supported");
   }
 
-  if (/SECURITY DATA/i.test(friendlyName)) {
-    pkcs8 = pkcs8Bags[(forge as any).oids.pkcs8ShroudedKeyBag]![0];
-  }
+  certificate = cert.cert!;
 
-  certificate = cert.cert;
-
-  const notBefore = certificate!.validity["notBefore"];
-  const notAfter = certificate!.validity["notAfter"];
+  const notBefore = certificate!.validity.notBefore;
+  const notAfter = certificate!.validity.notAfter;
   const date = new Date();
 
   if (date < notBefore || date > notAfter) {
     throw new Error("Expired certificate");
   }
-  const key = (pkcs8 as any).key ?? (pkcs8 as any).asn1;
-  const certificateX509_pem = forge.pki.certificateToPem(certificate!);
 
-  let certificateX509 = certificateX509_pem;
-  certificateX509 = certificateX509.substring(certificateX509.indexOf("\n"));
-  certificateX509 = certificateX509.substring(
-    0,
-    certificateX509.indexOf("\n-----END CERTIFICATE-----") - 1
+  const key = pkcs8.key ?? pkcs8.asn1;
+  const certificateX509_pem = forge.pki.certificateToPem(certificate);
+
+  let certificateX509 = certificateX509_pem.substring(
+    certificateX509_pem.indexOf("\n") + 1,
+    certificateX509_pem.indexOf("\n-----END CERTIFICATE-----")
   );
 
   certificateX509 = certificateX509
     .replace(/\r?\n|\r/g, "")
     .replace(/([^\0]{76})/g, "$1\n");
 
-  const certificateX509_asn1 = forge.pki.certificateToAsn1(certificate!);
+  const certificateX509_asn1 = forge.pki.certificateToAsn1(certificate);
   const certificateX509_der = forge.asn1.toDer(certificateX509_asn1).getBytes();
   const hash_certificateX509_der = sha1Base64(certificateX509_der, "utf8");
-  const certificateX509_serialNumber = parseInt(certificate!.serialNumber, 16);
+  const certificateX509_serialNumber = parseInt(certificate.serialNumber, 16);
 
-  const exponent = hexToBase64(key.e.data[0].toString(16));
-  const modulus = bigIntToBase64(key.n);
-
-  xml = xml.replace(/\t|\r/g, "");
+  const exponent = hexToBase64(
+    (key as forge.pki.rsa.PrivateKey).e.data[0].toString(16)
+  );
+  const modulus = bigIntToBase64((key as forge.pki.rsa.PrivateKey).n);
 
   const sha1_xml = sha1Base64(
     xml.replace('<?xml version="1.0" encoding="UTF-8"?>', ""),
@@ -247,20 +242,16 @@ export async function signXml(
   const signatureValueNumber = getRandomNumber();
   const objectNumber = getRandomNumber();
 
-  const isoDateTime = date.toISOString().slice(0, 19);
+  const isoDateTime = date.toISOString().slice(0, 19) + "Z";
 
-  let signedProperties = "";
-  signedProperties +=
-    '<etsi:SignedProperties Id="Signature' +
-    signatureNumber +
-    "-SignedProperties" +
-    signedPropertiesNumber +
-    '">';
+  console.log("ISO DATE:", date.toISOString());
+  console.log("ISO DATE TIME SLICE:", isoDateTime);
+
+  let signedProperties = `<etsi:SignedProperties Id="Signature${signatureNumber}-SignedProperties${signedPropertiesNumber}">`;
 
   signedProperties += "<etsi:SignedSignatureProperties>";
-  signedProperties += "<etsi:SigningTime>";
-  signedProperties += isoDateTime;
-  signedProperties += "</etsi:SigningTime>";
+  signedProperties +=
+    "<etsi:SigningTime>" + isoDateTime + "</etsi:SigningTime>";
   signedProperties += "<etsi:SigningCertificate>";
   signedProperties += "<etsi:Cert>";
   signedProperties += "<etsi:CertDigest>";
@@ -285,7 +276,7 @@ export async function signXml(
 
   signedProperties += "<etsi:SignedDataObjectProperties>";
   signedProperties +=
-    '<etsi:DataObjectFormat ObjectReference="#Reference-ID=' +
+    '<etsi:DataObjectFormat ObjectReference="#Reference-ID-' +
     referenceIdNumber +
     '">';
   signedProperties += "<etsi:Description>";
@@ -300,7 +291,7 @@ export async function signXml(
 
   const sha1SignedProperties = sha1Base64(
     signedProperties.replace(
-      "<ets:SignedProperties",
+      "<etsi:SignedProperties",
       "<etsi:SignedProperties " + nameSpaces
     ),
     "utf8"
@@ -318,9 +309,7 @@ export async function signXml(
   keyInfo += "\n<ds:Modulus>\n";
   keyInfo += modulus;
   keyInfo += "\n</ds:Modulus>";
-  keyInfo += "\n<ds:Exponent>\n";
-  keyInfo += exponent;
-  keyInfo += "\n</ds:Exponent>";
+  keyInfo += "\n<ds:Exponent>" + exponent + "</ds:Exponent>";
   keyInfo += "\n</ds:RSAKeyValue>";
   keyInfo += "\n</ds:KeyValue>";
   keyInfo += "\n</ds:KeyInfo>";
@@ -364,12 +353,12 @@ export async function signXml(
   signedInfo += "\n</ds:Reference>";
 
   signedInfo +=
-    '\n<ds:Reference Id="Reference-ID' +
+    '\n<ds:Reference Id="Reference-ID-' +
     referenceIdNumber +
     '" URI="#comprobante">';
   signedInfo += "\n<ds:Transforms>";
   signedInfo +=
-    '\n<ds:Transform Algorithm="http://www.w3.org/2000/09/xmlndsig#enveloped-signature">';
+    '\n<ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature">';
   signedInfo += "</ds:Transform>";
   signedInfo += "\n</ds:Transforms>";
   signedInfo +=
@@ -390,12 +379,9 @@ export async function signXml(
   const md = forge.md.sha1.create();
   md.update(canonicalizedSignedInfo, "utf8");
 
-  const signature = btoa(
-    key
-      .sign(md)
-      .match(/.{1,76}/g)
-      .join("\n")
-  );
+  const signature = btoa((key as forge.pki.rsa.PrivateKey).sign(md))
+    .match(/.{1,76}/g)!
+    .join("\n");
 
   let xadesBes = "";
   xadesBes +=
@@ -404,7 +390,6 @@ export async function signXml(
 
   xadesBes +=
     '\n<ds:SignatureValue Id="SignatureValue' + signatureValueNumber + '">\n';
-
   xadesBes += signature;
   xadesBes += "\n</ds:SignatureValue>";
   xadesBes += "\n" + keyInfo;
@@ -423,5 +408,9 @@ export async function signXml(
   xadesBes += "</ds:Object>";
   xadesBes += "</ds:Signature>";
 
-  return xml.replace(/(<[^<]+)$/, xadesBes + "$1");
+  xml = xml.replace(/(<[^<]+)$/, xadesBes + "$1");
+  return xml.replace(
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<?xml version="1.0" encoding="UTF-8"?>\n'
+  );
 }
